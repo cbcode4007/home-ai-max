@@ -1,3 +1,6 @@
+// Lightweight configuration file manager for mobile applications
+// Provides getters and setters for specific settings
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ConfigManager {

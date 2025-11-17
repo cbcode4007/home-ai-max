@@ -1,13 +1,12 @@
+// Lightweight device utilities for mobile applications
+// Provides getters, setters, and increment/decrement methods for volume and brightness
+
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 
 class DeviceUtils {
   final VolumeController _volumeController = VolumeController.instance;
   final ScreenBrightness _screenBrightness = ScreenBrightness.instance;
-
-  Future<void> init() async {
-    // VolumeController.instance doesn't need explicit init
-  }
 
   // Volume methods
   Future<double> getVolume() async {

@@ -1,4 +1,4 @@
-// Lightweight Porcupine wrapper for Home AI Max
+// Lightweight Porcupine wrapper for mobile applications with wake word capabilities
 // Provides simple initialization (built-ins or keyword paths), start/stop,
 // and a single callback for detections, to keep the app code cleaner
 
