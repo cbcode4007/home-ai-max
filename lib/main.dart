@@ -3,8 +3,8 @@
 
   Author:      Colin Fajardo
 
-  Version:     4.0.2               
-               - landscape adjustments unvaulted, finalized (fully optimized for wake word or hands off, minimal UI)
+  Version:     4.0.3               
+               - bug fixes regarding porcupine service not restarting after a STT listener timeout
 
   Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
 */
@@ -325,7 +325,7 @@ class _MainScreenState extends State<MainScreen> {
 
   // On orb press
   Future<void> _toggleListening() async {
-    // When it's already listening
+    // When STT listening
     if (_isListening) {
       _addDebug('Stopping listening');
       await _speech.stop();
@@ -334,20 +334,23 @@ class _MainScreenState extends State<MainScreen> {
       });
       _addDebug('Listening stopped');
       if (_hostMode) {
-        // Listen for wake word again instead
-        porcupineService?.start();
+        // Listen for wake word again instead (don't do anything else until it is ready; 4.0.3)
+        await porcupineService?.start();
         _addDebug('Porcupine service restarted');
       }      
       // Update brightness based on orb state
       _updateBrightnessForOrbState();
       
-    // When not listening and needs to initialize
+    // When STT not listening and needs to initialize
     } else {
       _addDebug('Initializing listening');
-      // Free up microphone from porcupine service
-      porcupineService?.stop();
-      _addDebug('Porcupine service stopped for transcription');
+      if (_hostMode) {
+        // Free up microphone from porcupine service (don't do anything else until it is done; 4.0.3)
+        await porcupineService?.stop();
+        _addDebug('Porcupine service stopped for transcription');
+      }
       bool available = await _speech.initialize(
+        // Callback invoked later for status transitions (listening, done, notListening)
         onStatus: (status) {
           if (status == 'done' || status == 'notListening') {
             setState(() {
@@ -375,9 +378,14 @@ class _MainScreenState extends State<MainScreen> {
           _addDebug('Listening error: ${error.errorMsg}');
           // Update brightness based on orb state
           _updateBrightnessForOrbState();
+          // Listen to wake word again (don't do anything else until it is ready; 4.0.3)
+          if (_hostMode) {
+            porcupineService?.start();
+          }
         },
       );
-      // When not listening and already initialized
+
+      // When STT not listening and already initialized
       if (available) {
         setState(() {
           _isListening = true;
@@ -387,7 +395,9 @@ class _MainScreenState extends State<MainScreen> {
         _addDebug('Listening started (mic button)');
         // Update brightness based on orb state
         _updateBrightnessForOrbState();
+        // Produces onResult and onStatus events
         _speech.listen(
+          // If any speech is detected
           onResult: (result) {
             setState(() {
               _lastRecognized = result.recognizedWords;
@@ -410,7 +420,13 @@ class _MainScreenState extends State<MainScreen> {
     final text = _controller.text.trim();
     final encodedBody = jsonEncode({'query': text});
     final headers = {'Content-Type': 'application/json'};
-    if (text.isEmpty) return;
+    if (text.isEmpty) {
+      // Listen to wake word again (don't do anything else until it is ready; 4.0.3)
+      if (_hostMode) {
+        await porcupineService?.start();
+      }
+      return;
+    }
     setState(() {
       _isLoading = true;
       _feedbackMessage = null;
@@ -440,9 +456,9 @@ class _MainScreenState extends State<MainScreen> {
                 _feedbackMessage = message;
               });
 
-              // Listen to wake word again
+              // Listen to wake word again (don't do anything else until it is ready; 4.0.3)
               if (_hostMode) {
-                porcupineService?.start();
+                await porcupineService?.start();
                 _addDebug('Porcupine service restarted');
               }
 
@@ -571,7 +587,7 @@ class _MainScreenState extends State<MainScreen> {
     final orientation = MediaQuery.of(context).orientation;
     return Scaffold(
       appBar: orientation == Orientation.landscape ? null : AppBar(
-        title: const Text('Home AI Max v4.0.1'),
+        title: const Text('Home AI Max'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -726,7 +742,7 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Settings'),
+        title: const Text('Settings (v4.0.3)'),
         content: Form(
           key: formKey,
           child: Column(
