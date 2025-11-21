@@ -3,9 +3,8 @@
 
   Author:      Colin Fajardo
 
-  Version:     4.0.5             
-               - main is almost entirely conducting its operations using objects instantiated from class files
-               - additional commenting
+  Version:     4.0.6             
+               - text field for sending to URL fixed, on certain phones minimized the keyboard immediately upon entry
 
   Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
 */
@@ -72,6 +71,7 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
+
   // Variables
   final List<String> _debugLog = [];
   bool _isSpeaking = false;
@@ -100,11 +100,11 @@ class _MainScreenState extends State<MainScreen> {
     _initializeApp();
   }
 
-  // Print a debug line to the in-app log, 10 are visible at a time
+  // Print a debug line to the in-app log, 20 are visible at a time
   void _addDebug(String message) {
     setState(() {
       _debugLog.add('[${DateTime.now().toIso8601String().substring(11,19)}] $message');
-      if (_debugLog.length > 10) {
+      if (_debugLog.length > 20) {
         _debugLog.removeAt(0);
       }
     });
@@ -469,6 +469,12 @@ class _MainScreenState extends State<MainScreen> {
   @override
   Widget build(BuildContext context) {
     final orientation = MediaQuery.of(context).orientation;
+    // Get the total screen height including any insets (keyboard space)
+    final totalHeight = MediaQuery.of(context).size.height;
+    // Calculate the height of the safe area (excluding system status bars/notches)
+    final safeAreaHeight = MediaQuery.of(context).padding.top + MediaQuery.of(context).padding.bottom;
+    // Calculate the actual usable height for the UI
+    final usableHeight = totalHeight - safeAreaHeight;
     return Scaffold(
       appBar: orientation == Orientation.landscape ? null : AppBar(
         title: const Text('Home AI Max'),
@@ -480,106 +486,111 @@ class _MainScreenState extends State<MainScreen> {
         ],
       ),
       body: SafeArea(
-        child: OrientationBuilder(
-          builder: (context, orientation) {
-            // Landscape, minimal UI with centered orb and subtitles beneath for dedicated use with voice
-            if (orientation == Orientation.landscape) {
-              return Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Orb visual (animates when speaking or listening)
-                    OrbVisualizer(
-                      isSpeaking: _isSpeaking,
-                      isListening: _isListening,
-                      size: 120,
-                      onTap: _isLoading ? null : _toggleListening,
-                    ),
-                    const SizedBox(height: 12),
-                    if (_isLoading) const CircularProgressIndicator(),
-                    if (_feedbackMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                        child: Text(
-                          _feedbackMessage!,
-                          style: const TextStyle(fontSize: 18, color: Colors.white),
-                          textAlign: TextAlign.center,
+        child: SingleChildScrollView(
+          child: SizedBox(
+            height: usableHeight,
+            child: OrientationBuilder(
+              builder: (context, orientation) {
+                // Landscape, minimal UI with centered orb and subtitles beneath for dedicated use with voice
+                if (orientation == Orientation.landscape) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Orb visual (animates when speaking or listening)
+                        OrbVisualizer(
+                          isSpeaking: _isSpeaking,
+                          isListening: _isListening,
+                          size: 120,
+                          onTap: _isLoading ? null : _toggleListening,
                         ),
-                      ),
-                  ],
-                ),
-              );
-            }
-            // Portrait, full UI with the text input and debug log for feature rich use on a more convenient orientation
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    // Orb visual (animates when speaking or listening)
-                    OrbVisualizer(
-                      isSpeaking: _isSpeaking,
-                      isListening: _isListening,
-                      size: 120,
-                      onTap: _isLoading ? null : _toggleListening,
-                    ),
-                    const SizedBox(height: 48),
-                    _buildTextInput(context),
-                    const SizedBox(height: 16),
-                    if (_isLoading) const CircularProgressIndicator(),
-                    if (_feedbackMessage != null && !_isLoading)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Builder(builder: (context) {
-                          final msg = _feedbackMessage!;
-                          Color color;
-                          final lower = msg.toLowerCase();
-                          if (msg.startsWith('Message sent') || msg.startsWith('Config reloaded')) {
-                            color = Colors.greenAccent;
-                          } else if (lower.startsWith('error') || lower.contains('failed') || lower.contains('error')) {
-                            color = Colors.redAccent;
-                          } else {
-                            // Normal server-returned text should be white
-                            color = Colors.white;
-                          }
-                          return Text(
-                            msg,
-                            style: TextStyle(
-                              color: color,
-                              fontWeight: FontWeight.w500,
+                        const SizedBox(height: 12),
+                        if (_isLoading) const CircularProgressIndicator(),
+                        if (_feedbackMessage != null)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                            child: Text(
+                              _feedbackMessage!,
+                              style: const TextStyle(fontSize: 18, color: Colors.white),
+                              textAlign: TextAlign.center,
                             ),
-                            textAlign: TextAlign.center,
-                          );
-                        }),
-                      ),
-                    const SizedBox(height: 32),
-                    // Debug log area (only shown if enabled)
-                    if (_debugLogVisible)
-                      Container(
-                        alignment: Alignment.bottomLeft,
-                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: Color.fromARGB((0.7 * 255).round(), 0, 0, 0),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        constraints: const BoxConstraints(maxHeight: 120),
-                        child: SingleChildScrollView(
-                          reverse: true,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: _debugLog.map((msg) => Text(
-                              msg,
-                              style: const TextStyle(fontSize: 12, color: Colors.greenAccent),
-                            )).toList(),
                           ),
+                      ],
+                    ),
+                  );
+                }
+                // Portrait, full UI with the text input and debug log for feature rich use on a more convenient orientation
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Orb visual (animates when speaking or listening)
+                        OrbVisualizer(
+                          isSpeaking: _isSpeaking,
+                          isListening: _isListening,
+                          size: 120,
+                          onTap: _isLoading ? null : _toggleListening,
                         ),
-                      ),
-                  ],
-                ),
-              ),
-            );
-          },
+                        const SizedBox(height: 48),
+                        _buildTextInput(context),
+                        const SizedBox(height: 16),
+                        if (_isLoading) const CircularProgressIndicator(),
+                        if (_feedbackMessage != null && !_isLoading)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Builder(builder: (context) {
+                              final msg = _feedbackMessage!;
+                              Color color;
+                              final lower = msg.toLowerCase();
+                              if (msg.startsWith('Message sent') || msg.startsWith('Config reloaded')) {
+                                color = Colors.greenAccent;
+                              } else if (lower.startsWith('error') || lower.contains('failed') || lower.contains('error')) {
+                                color = Colors.redAccent;
+                              } else {
+                                // Normal server-returned text should be white
+                                color = Colors.white;
+                              }
+                              return Text(
+                                msg,
+                                style: TextStyle(
+                                  color: color,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                              );
+                            }),
+                          ),
+                        const SizedBox(height: 32),
+                        // Debug log area (only shown if enabled)
+                        if (_debugLogVisible)
+                          Container(
+                            alignment: Alignment.bottomLeft,
+                            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: Color.fromARGB((0.7 * 255).round(), 0, 0, 0),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            constraints: const BoxConstraints(maxHeight: 120),
+                            child: SingleChildScrollView(
+                              reverse: true,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: _debugLog.map((msg) => Text(
+                                  msg,
+                                  style: const TextStyle(fontSize: 12, color: Colors.greenAccent),
+                                )).toList(),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
         ),
       ),
     );
@@ -627,7 +638,7 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Settings (v4.0.5)'),
+        title: const Text('Settings (v4.0.6)'),
         content: Form(
           key: formKey,
           child: Column(
