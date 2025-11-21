@@ -3,24 +3,31 @@
 
   Author:      Colin Fajardo
 
-  Version:     4.0.4               
-               - restructured code to be nicer and more practical for debugging               
+  Version:     4.0.5             
+               - main is almost entirely conducting its operations using objects instantiated from class files
+               - additional commenting
 
   Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
 */
 
-
+// Basic UI package
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:audioplayers/audioplayers.dart';
+// Unique component of UI
 import 'widgets/orb_visualizer.dart';
+// Manages translation of recorded speech into text to send
 import 'stt/stt_manager.dart';
+// Manages the configuration of the app by loading and saving its settings
 import 'config.dart';
+// Manages utility settings for the device itself, namely volume and brightness
 import 'device_utils.dart';
+// Manages a specific wake word the device will listen for to proceed with an operation
 import 'porcupine_service.dart';
+// Manages a server that listens for incoming requests so that the AI backend can set things such as volume or brightness
 import 'local_server/local_server.dart';
+// Manages the transmission of HTTP payloads and their responses through the app
+import 'payload_service.dart';
+// Manages translation of responses into spoken audio, default through a server but can fall back to local device TTS
+import 'tts/tts_manager.dart';
 
 
 final DeviceUtils deviceUtils = DeviceUtils();
@@ -65,29 +72,35 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
+  // Variables
   final List<String> _debugLog = [];
   bool _isSpeaking = false;
-  late final FlutterTts _tts;
   LocalServer? _localServer;
-  late final AudioPlayer _audioPlayer;
+  late PayloadService _payloadService;
+  late TtsManager _ttsManager;
   final Map<String, String> _config = {};
   bool _debugLogVisible = false;
   bool _autoSendSpeech = false;
   bool _hostMode = false;
   double _userBrightness = 0.2;
   PorcupineService? porcupineService;
+  final TextEditingController _controller = TextEditingController();
+  bool _isLoading = false;
+  String? _feedbackMessage;
+  late SttManager _sttManager;
+  bool _isListening = false;
+  String _lastRecognized = '';
+  bool _autoSentThisSession = false;
 
-  // Called when Porcupine detects a wake word. Toggles listening if not already listening.
-  void _onWakeDetected(int keywordIndex) {
-    _addDebug('Porcupine detected keyword index=$keywordIndex');
-    // Only trigger UI actions on the main thread
-    if (!mounted) return;
-    // If we're already listening via the orb, do nothing
-    if (_isListening) return;
-    // Toggle listening (do not await to avoid blocking the detection callback)
-    _toggleListening();
+  /* Startup Functions (may run automatically during app startup) */
+
+  @override
+  void initState() {
+    super.initState();
+    _initializeApp();
   }
 
+  // Print a debug line to the in-app log, 10 are visible at a time
   void _addDebug(String message) {
     setState(() {
       _debugLog.add('[${DateTime.now().toIso8601String().substring(11,19)}] $message');
@@ -95,26 +108,6 @@ class _MainScreenState extends State<MainScreen> {
         _debugLog.removeAt(0);
       }
     });
-  }
-
-  // Helper method to update brightness based on orb state (only if host mode is enabled)
-  Future<void> _updateBrightnessForOrbState() async {
-    if (!_hostMode) return; // Don't touch brightness if host mode is off
-    
-    final isOrbActive = _isListening || _isSpeaking;
-    if (isOrbActive) {
-      await deviceUtils.setBrightness(1.0);
-      _addDebug('Brightness set to max (orb active)');
-    } else {
-      await deviceUtils.setBrightness(_userBrightness);
-      _addDebug('Brightness reset to user setting (orb inactive)');
-    }
-  }
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeApp();
   }
 
   Future<void> _initializeApp() async {
@@ -136,6 +129,7 @@ class _MainScreenState extends State<MainScreen> {
         });
     _addDebug('Transcribing (mic button): "$words"');
       },
+      // Callback for when a status is returned
       onStatus: (status) {
         if (status == 'done' || status == 'notListening') {
           setState(() {
@@ -145,6 +139,7 @@ class _MainScreenState extends State<MainScreen> {
           // Update brightness based on orb state
           _updateBrightnessForOrbState();
           // Auto-send only when speech recognition is truly complete ('done' status)
+          // and always in landscape, only when auto-send is enabled in portrait
           final shouldAutoSend = MediaQuery.of(context).orientation == Orientation.landscape ||
                                (_autoSendSpeech && _controller.text.trim().isNotEmpty);
           if (status == 'done' && shouldAutoSend && !_autoSentThisSession) {
@@ -154,6 +149,7 @@ class _MainScreenState extends State<MainScreen> {
           }
         }
       },
+      // Callback for when an error occurs
       onError: (err) {
         setState(() {
           _isListening = false;
@@ -168,41 +164,36 @@ class _MainScreenState extends State<MainScreen> {
       },
       onLog: _addDebug,
     );
-    _tts = FlutterTts();
-    _audioPlayer = AudioPlayer();
-    _audioPlayer.onPlayerComplete.listen((event) {
-      setState(() => _isSpeaking = false);
-      _addDebug('AudioPlayer: playback complete');
-      // Update brightness based on orb state
-      _updateBrightnessForOrbState();
-    });    
+    // Initialize payload and TTS managers
+    _payloadService = PayloadService(onLog: _addDebug);
+    _ttsManager = TtsManager(
+      onLog: _addDebug,
+      onStart: () {
+        setState(() => _isSpeaking = true);
+        _addDebug('TTS: start handler');
+        _updateBrightnessForOrbState();
+      },
+      onComplete: () {
+        setState(() => _isSpeaking = false);
+        _addDebug('TTS: complete handler');
+        _updateBrightnessForOrbState();
+      },
+      onError: (msg) {
+        setState(() => _isSpeaking = false);
+        _addDebug('TTS: error handler: $msg');
+        _updateBrightnessForOrbState();
+      },
+    );
+    _ttsManager.init();
     // 4.0.4, turned repeated starting Flask server and initializing Porcupine into a separate method
     if (_hostMode) {
       await _startHostServices();
     }    
-    _addDebug('Initializing TTS');
-    _tts.setStartHandler(() {
-      setState(() => _isSpeaking = true);
-      _addDebug('TTS: start handler called');
-      // Update brightness based on orb state
-      _updateBrightnessForOrbState();
-    });
-    _tts.setCompletionHandler(() {
-      setState(() => _isSpeaking = false);
-      _addDebug('TTS: completion handler called');
-      // Update brightness based on orb state
-      _updateBrightnessForOrbState();
-    });
-    _tts.setErrorHandler((msg) {
-      setState(() => _isSpeaking = false);
-      _addDebug('TTS: error handler called: $msg');
-      // Update brightness based on orb state
-      _updateBrightnessForOrbState();
-    });
   }
 
   Future<void> _initConfig() async {
     try {
+      // Load all config values into the app
       final webhook = await ConfigManager.getWebhookUrl();
       final tts = await ConfigManager.getTtsServerUrl();
       final debugVisible = await ConfigManager.getDebugLogVisible();
@@ -216,7 +207,6 @@ class _MainScreenState extends State<MainScreen> {
         _hostMode = hostMode;
       });
       _addDebug('Config loaded: webhook=$webhook tts=$tts debugVisible=$debugVisible autoSend=$autoSend hostMode=$hostMode');
-      // Note: Brightness is handled separately in _initializeApp() to preserve user's current setting
     } catch (e) {
       _addDebug('Failed to load config: $e');
     }
@@ -224,25 +214,35 @@ class _MainScreenState extends State<MainScreen> {
 
   Future<void> _startHostServices() async {
     if (_localServer == null) {
-      // Start local server to receive notifications from Flask
       _addDebug('Starting local server...');
       _localServer = LocalServer(
+        // Callback for when a command is received on the /speak endpoint
+        // Play a received message using TTS manager
         onSpeak: (String message) async {
           if (!mounted) return;
           setState(() {
             _feedbackMessage = message;
           });
           _addDebug('Received message: $message');
-          await _playTtsServer(message);
+          try {
+            final ttsUrl = _config['tts'] ?? await ConfigManager.getTtsServerUrl();
+            await _ttsManager.requestAndPlayFromServer(ttsUrl, message);
+          } catch (e) {
+            _addDebug('Error playing speak request: $e');
+          }
         },
+        // Callback for when a command is received on the /control endpoint
         onControl: (Map<String, dynamic> data) async {
           try {
             final vol = data['volume'] as Map<String, dynamic>;
             if (vol.containsKey('level')) {
+              // Set volume to specified level
               String volLevel = vol['level'].toString().toLowerCase();
               _addDebug("Level was provided: $volLevel");
               deviceUtils.setVolume(double.parse(volLevel));
-            } else if (vol.containsKey('tune')) {
+            }
+            else if (vol.containsKey('tune')) {
+              // Change volume by arbitrary positive or negative amount
               String volTune = vol['tune'].toString().toLowerCase();
               _addDebug("Tune was provided: $volTune");
               if (volTune == "increment") {
@@ -270,8 +270,6 @@ class _MainScreenState extends State<MainScreen> {
               SnackBar(content: Text('Local server failed to start: $e')),
             );
           }
-          // If server fails, we don't proceed to start porcupine
-          return;
         }
     }
     if (porcupineService == null) {
@@ -302,17 +300,16 @@ class _MainScreenState extends State<MainScreen> {
     return;
   }
 
-  Future<void> _stopHostServices() async {
-    if (_localServer != null) {
-      _addDebug('Shutting down local server...');
-      await _localServer?.stop();
-      _localServer = null;
-    }
-    if (porcupineService != null) {
-      _addDebug('Shutting down porcupine service...');
-      await porcupineService?.dispose();
-      porcupineService = null;
-    }
+  /* Input Functions (run after a user interaction with the interface) */
+
+  @override
+  void dispose() {
+    _sttManager.dispose();
+    _ttsManager.dispose();
+    _payloadService.dispose();
+    _localServer?.stop();
+    porcupineService?.dispose();
+    super.dispose();
   }
 
   Future<void> _resetSettings() async {
@@ -330,31 +327,22 @@ class _MainScreenState extends State<MainScreen> {
     } catch (e) {
       _addDebug('Failed to reset defaults: $e');
     }
+  }  
+
+  Future<void> _stopHostServices() async {
+    if (_localServer != null) {
+      _addDebug('Shutting down local server...');
+      await _localServer?.stop();
+      _localServer = null;
+    }
+    if (porcupineService != null) {
+      _addDebug('Shutting down porcupine service...');
+      await porcupineService?.dispose();
+      porcupineService = null;
+    }
   }
 
-  final TextEditingController _controller = TextEditingController();
-  bool _isLoading = false;
-  String? _feedbackMessage;
-
-  late SttManager _sttManager;
-  bool _isListening = false;
-  String _lastRecognized = '';
-  bool _autoSentThisSession = false;
-
-  @override
-  void dispose() {
-    _sttManager.dispose();
-    _tts.stop();
-    _audioPlayer.dispose();
-    _localServer?.stop();
-    // Stop and dispose porcupine service if active
-    porcupineService?.dispose();
-    super.dispose();
-  }
-
-  // 4.0.4, Local server logic has been moved to 'lib/local_server/local_server.dart'
-
-  // On orb press
+  // On orb press, act with listeners depending on their current conditions
   Future<void> _toggleListening() async {
     // When STT listening
     if (_isListening) {
@@ -376,7 +364,7 @@ class _MainScreenState extends State<MainScreen> {
     } else {
       _addDebug('Initializing listening');
       if (_hostMode) {
-        // Free up microphone from porcupine service (don't do anything else until it is done; 4.0.3)
+        // Free up microphone from porcupine service (don't do anything else until this is done; 4.0.3)
         await porcupineService?.stop();
         _addDebug('Porcupine service stopped for transcription');
       }
@@ -400,15 +388,12 @@ class _MainScreenState extends State<MainScreen> {
     }
   }
 
+  // POST the contents of text input to specified server endpoint, and try to display as well as read its response
   Future<void> _sendText() async {
     final text = _controller.text.trim();
-    final encodedBody = jsonEncode({'query': text});
-    final headers = {'Content-Type': 'application/json'};
+    // Abort and go back to listening to porcupine wake word if the text field got through while empty
     if (text.isEmpty) {
-      // Listen to wake word again (don't do anything else until it is ready; 4.0.3)
-      if (_hostMode) {
-        await porcupineService?.start();
-      }
+      if (_hostMode) await porcupineService?.start();
       return;
     }
     setState(() {
@@ -416,155 +401,70 @@ class _MainScreenState extends State<MainScreen> {
       _feedbackMessage = null;
     });
     try {
+      // POST to the set URL
       final webhookUrl = _config['webhook'] ?? await ConfigManager.getWebhookUrl();
-      _addDebug('Payload: $encodedBody');
-      final response = await http.post(
-        Uri.parse(webhookUrl),
-        headers: headers,
-        body: encodedBody,
-      // Timeout modified from 5 to 20 seconds for AI with reasoning effort
-      ).timeout(const Duration(seconds: 20));
-      _addDebug('Response: ${response.statusCode} ${response.reasonPhrase}');
-      if (response.statusCode >= 200 && response.statusCode < 300) {        
-        try {
-          final decoded = jsonDecode(response.body);
-          _addDebug('Response JSON decoded');
+      _addDebug('Sending payload to webhook: $webhookUrl');
+      
+      // Return response
+      final decoded = await _payloadService.sendText(text, webhookUrl);
+      _addDebug('PayloadService returned');
 
-          if (decoded['status'] == 'ok') {
-            final message = decoded['message'] ?? '';
-            final audioB64 = decoded['audio_b64'];
-
-            if (message.isNotEmpty) {
-              _addDebug('Server reply: $message');
-              setState(() {
-                _feedbackMessage = message;
-              });
-
-              // Listen to wake word again (don't do anything else until it is ready; 4.0.3)
-              if (_hostMode) {
-                await porcupineService?.start();
-                _addDebug('Porcupine service restarted');
-              }
-
-              // Play audio if available
-              if (audioB64 != null && audioB64.isNotEmpty) {
-                _addDebug('Playing GTTS base64 audio from response');
-                setState(() => _isSpeaking = true);
-                // Update brightness based on orb state
-                await _updateBrightnessForOrbState();
-                try {
-                  // Decode base64 audio
-                  final audioBytes = base64Decode(audioB64);
-                  await _audioPlayer.play(BytesSource(audioBytes));
-                } catch (e) {
-                  _addDebug('Base64 audio playback error: $e');
-                  // Fallback to local TTS
-                  await _playTtsLocal(message);
-                }
-              } else {
-                // No audio, use local TTS
-                setState(() => _isSpeaking = true);
-                // Update brightness based on orb state
-                await _updateBrightnessForOrbState();
-                await _playTtsLocal(message);
-              }              
-            } else {
-              setState(() {
-                _feedbackMessage = 'Message sent successfully! (no reply)';
-              });
-            }
-          } else {
-            // Error status from server
-            final errorMessage = decoded['message'] ?? 'Unknown error';
-            setState(() {
-              _feedbackMessage = 'Server error: $errorMessage';
-            });
-          }
-        } catch (e) {
-          _addDebug('JSON parsing error: $e');
-          setState(() {
-            _feedbackMessage = 'Response parsing error: $e';
-          });
-        }
-        _controller.clear();
-      } else {
+      final message = decoded['message'] ?? '';
+      if (message != null && (message as String).isNotEmpty) {
         setState(() {
-          _feedbackMessage = 'Failed to send: \n${response.statusCode} ${response.reasonPhrase}';
+          _feedbackMessage = message;
         });
       }
-    } catch (e) {
-      _addDebug('Error sending: $e');
-      setState(() {
-        _feedbackMessage = 'Error: \n${e.toString()}';
-      });
-    } finally {
-      setState(() {
-        _isLoading = false;
-      });
-    }
-  }
+      _controller.clear();
+      try {
+        // Play response
+        await _ttsManager.playPayloadResponse(decoded);
+      } catch (e) {
+        _addDebug('TTS playback failed: $e');
+      }
 
-  Future<void> _playTtsServer(String text) async {
-    try {
-      final ttsUrl = _config['tts'] ?? await ConfigManager.getTtsServerUrl();
-      final uri = Uri.parse(ttsUrl);
-      _addDebug('Requesting TTS from $uri');
-      final resp = await http.post(uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'text': text}),
-      ).timeout(const Duration(seconds: 8));
-      _addDebug('TTS response: ${resp.statusCode} ${resp.reasonPhrase}');
-      _addDebug('TTS response headers: ${resp.headers}');
-      if (resp.statusCode >= 200 && resp.statusCode < 300) {
-        final contentType = resp.headers['content-type'] ?? '';
-        if (contentType.contains('audio') && resp.bodyBytes.isNotEmpty) {
-          _addDebug('Playing returned audio (${resp.bodyBytes.length} bytes)');
-          setState(() => _isSpeaking = true);
-          // Update brightness based on orb state
-          await _updateBrightnessForOrbState();
-          try {
-            await _audioPlayer.play(BytesSource(resp.bodyBytes));
-          } catch (e) {
-            _addDebug('AudioPlayer.play error: $e');
-            // fallback to local TTS
-            await _playTtsLocal(text);
-          }
-        } else {
-          // Not audio, maybe JSON with text reply
-          _addDebug('TTS response is not audio, falling back to local TTS');
-          String? reply;
-          try {
-            final decoded = jsonDecode(resp.body);
-            if (decoded is Map) reply = decoded['reply'] ?? decoded['message'] ?? decoded['text'];
-          } catch (_) {
-            // ignore
-          }
-          await _playTtsLocal(reply ?? text);
-        }
-      } else {
-        _addDebug('TTS request failed: ${resp.statusCode}');
-        await _playTtsLocal(text);
+      if (_hostMode) {
+        // Listen for wake word again instead (don't do anything else until it is ready; 4.0.3)
+        await porcupineService?.start();
+        _addDebug('Porcupine service restarted');
       }
     } catch (e) {
-      _addDebug('Error requesting TTS: $e');
-      await _playTtsLocal(text);
+      _addDebug('Error sending payload: $e');
+      if (!mounted) return;
+      setState(() {
+        _feedbackMessage = 'Error: ${e.toString()}';
+      });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _playTtsLocal(String text) async {
-    try {
-      _addDebug('TTS: using local TTS');
-      _addDebug('TTS: preparing to speak');
-      await _tts.setLanguage('en-US');
-      await _tts.setPitch(1.0);
-      final speakResult = await _tts.speak(text);
-      _addDebug('TTS.speak returned: $speakResult');
-      // some platforms return immediately and call completion handler later
-    } catch (e, st) {
-      _addDebug('TTS speak error: $e\n$st');
-      setState(() => _isSpeaking = false);
+  // Called when Porcupine detects a wake word, toggles listening if not already listening
+  void _onWakeDetected(int keywordIndex) {
+    _addDebug('Porcupine detected keyword index=$keywordIndex');
+    // Only trigger UI actions on the main thread
+    if (!mounted) return;
+    // If we're already listening via the orb, do nothing
+    if (_isListening) return;
+    // Toggle listening (do not await to avoid blocking the detection callback)
+    _toggleListening();
+  }
+
+  // Helper method to update brightness based on orb state (only if host mode is enabled)
+  Future<void> _updateBrightnessForOrbState() async {
+    if (!_hostMode) return;
+    
+    final isOrbActive = _isListening || _isSpeaking;
+    if (isOrbActive) {
+      await deviceUtils.setBrightness(1.0);
+      _addDebug('Brightness set to max (orb active)');
+    } else {
+      await deviceUtils.setBrightness(_userBrightness);
+      _addDebug('Brightness reset to user setting (orb inactive)');
     }
   }
+
+  /* UI */
 
   @override
   Widget build(BuildContext context) {
@@ -582,12 +482,13 @@ class _MainScreenState extends State<MainScreen> {
       body: SafeArea(
         child: OrientationBuilder(
           builder: (context, orientation) {
-            // Landscape: minimal UI — centered orb and subtitles beneath
+            // Landscape, minimal UI with centered orb and subtitles beneath for dedicated use with voice
             if (orientation == Orientation.landscape) {
               return Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
+                    // Orb visual (animates when speaking or listening)
                     OrbVisualizer(
                       isSpeaking: _isSpeaking,
                       isListening: _isListening,
@@ -595,6 +496,7 @@ class _MainScreenState extends State<MainScreen> {
                       onTap: _isLoading ? null : _toggleListening,
                     ),
                     const SizedBox(height: 12),
+                    if (_isLoading) const CircularProgressIndicator(),
                     if (_feedbackMessage != null)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -608,8 +510,7 @@ class _MainScreenState extends State<MainScreen> {
                 ),
               );
             }
-
-            // Portrait: full UI (existing layout)
+            // Portrait, full UI with the text input and debug log for feature rich use on a more convenient orientation
             return Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24.0),
@@ -726,7 +627,7 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Settings (v4.0.3)'),
+        title: const Text('Settings (v4.0.5)'),
         content: Form(
           key: formKey,
           child: Column(
@@ -840,7 +741,7 @@ class _MainScreenState extends State<MainScreen> {
               await ConfigManager.setHostMode(hostMode);
               if (hostMode) {
                 // When enabling host mode, start the server and porcupine wake word service (not already running)
-                // Await this so we can surface errors immediately instead of waiting for a restart
+                // Await this so errors surface immediately instead of waiting for a restart
                 _addDebug('Enabling host mode (starting host services)...');
                 await _startHostServices();
                 _addDebug('Host mode enabled: local server and porcupine service started');
