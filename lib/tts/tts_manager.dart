@@ -1,3 +1,12 @@
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Manager class for all local text to speech operations.
+*/
+
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter_tts/flutter_tts.dart';

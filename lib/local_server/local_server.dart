@@ -1,3 +1,12 @@
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Class for instantiating a local HTTP server for an app to handle incoming requests.
+*/
+
 import 'dart:io';
 
 import 'speak_handler.dart';

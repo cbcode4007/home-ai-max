@@ -1,3 +1,12 @@
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Handler for requests received on the /speak endpoint.
+*/
+
 import 'dart:convert';
 import 'dart:io';
 

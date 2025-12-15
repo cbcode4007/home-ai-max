@@ -1,5 +1,11 @@
-// Lightweight device utilities for mobile applications
-// Provides getters, setters, and increment/decrement methods for volume and brightness
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Lightweight device utilities for apps, with getters, setters and increment/decrement methods for volume/brightness for now.
+*/
 
 import 'package:volume_controller/volume_controller.dart';
 import 'package:screen_brightness/screen_brightness.dart';

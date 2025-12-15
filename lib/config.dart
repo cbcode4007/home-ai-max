@@ -1,5 +1,11 @@
-// Lightweight configuration file manager for mobile applications
-// Provides getters and setters for specific settings
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Lightweight configuration file manager for Home AI Max, with getters and setters for specific settings.
+*/
 
 import 'package:shared_preferences/shared_preferences.dart';
 

@@ -1,3 +1,12 @@
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Manager class for all local speech to text operations.
+*/
+
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 
 typedef SttResultCallback = void Function(String recognizedWords);

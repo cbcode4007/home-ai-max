@@ -1,3 +1,12 @@
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Simple service class for encapsulating all text payload sending and response handling.
+*/
+
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'dart:async';

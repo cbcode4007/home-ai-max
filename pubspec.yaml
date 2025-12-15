@@ -47,6 +47,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   volume_controller: ^3.4.0
   screen_brightness: ^1.0.1
+  flutter_dotenv: ^6.0.0
 
 dev_dependencies:
   flutter_test:

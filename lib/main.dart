@@ -1,10 +1,9 @@
 /*
-  File:        lib/main.dart
+  © 2025 Colin Bond
+  All rights reserved.
 
-  Author:      Colin Fajardo
-
-  Version:     4.0.6             
-               - text field for sending to URL fixed, on certain phones minimized the keyboard immediately upon entry
+  Version:     4.0.7             
+               - explicit copyright notices in all relevant .dart files, picovoice/porcupine API key must be dart defined for security
 
   Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
 */
@@ -28,10 +27,7 @@ import 'payload_service.dart';
 // Manages translation of responses into spoken audio, default through a server but can fall back to local device TTS
 import 'tts/tts_manager.dart';
 
-
-final DeviceUtils deviceUtils = DeviceUtils();
-
-void main() {
+void main() {  
   runApp(const HomeAIMaxApp());
 }
 
@@ -71,7 +67,6 @@ class MainScreen extends StatefulWidget {
 }
 
 class _MainScreenState extends State<MainScreen> {
-
   // Variables
   final List<String> _debugLog = [];
   bool _isSpeaking = false;
@@ -91,6 +86,10 @@ class _MainScreenState extends State<MainScreen> {
   bool _isListening = false;
   String _lastRecognized = '';
   bool _autoSentThisSession = false;
+  final DeviceUtils deviceUtils = DeviceUtils();
+  // 4.0.7, initialize variable for environment key
+  String pKey = '';
+
 
   /* Startup Functions (may run automatically during app startup) */
 
@@ -158,7 +157,7 @@ class _MainScreenState extends State<MainScreen> {
         // Update brightness based on orb state
         _updateBrightnessForOrbState();
         // Listen to wake word again (don't do anything else until it is ready; 4.0.3)
-        if (_hostMode) {
+        if (_hostMode) {          
           porcupineService?.start();
         }
       },
@@ -277,8 +276,11 @@ class _MainScreenState extends State<MainScreen> {
         _addDebug('Starting porcupine service...');
         porcupineService = PorcupineService(onWake: _onWakeDetected);
         try {
+          _addDebug('Fetching API Key...');
+          pKey = await _loadKey();
+          _addDebug('Returned API Key: $pKey');
           await porcupineService!.initFromAssetPaths(
-            "smt9H1XEv468kWRh0SnXkmOnDxCx2/DEXOwkTXFwzwPmM1IKwg1ykQ==",
+            pKey,
             ["assets/Maxine_en_android_v3_0_0.ppn"],
           );
           await porcupineService!.start();
@@ -299,6 +301,15 @@ class _MainScreenState extends State<MainScreen> {
     }
     return;
   }
+
+  Future<String> _loadKey() async {
+  // 4.0.7, load API key from environment variable passed at compile time
+  const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
+  if (apiKey.isEmpty) {
+    throw Exception('Missing API_KEY. Add it via --dart-define=API_KEY=... or provide a server-side proxy.');
+  }
+  return apiKey;
+}
 
   /* Input Functions (run after a user interaction with the interface) */
 
@@ -638,7 +649,7 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Settings (v4.0.6)'),
+        title: const Text('Settings (v4.0.7)'),
         content: Form(
           key: formKey,
           child: Column(

@@ -1,9 +1,15 @@
-import 'dart:math';
+/*
+  © 2025 Colin Bond
+  All rights reserved.
 
+  Version:     1.0.0                            
+
+  Description: Class that when instantiated shows a glowing orb, which will animate when an app is speaking or listening for speech.
+*/
+
+import 'dart:math';
 import 'package:flutter/material.dart';
 
-/// OrbVisualizer shows a glowing orb that animates when [isSpeaking] is true.
-/// When [isListening] is true, the orb turns red and expands.
 class OrbVisualizer extends StatefulWidget {
   final bool isSpeaking;
   final bool isListening;

@@ -1,6 +1,11 @@
-// Lightweight Porcupine wrapper for mobile applications with wake word capabilities
-// Provides simple initialization (built-ins or keyword paths), start/stop,
-// and a single callback for detections, to keep the app code cleaner
+/*
+  © 2025 Colin Bond
+  All rights reserved.
+
+  Version:     1.0.0                            
+
+  Description: Lightweight Porcupine wrapper for apps with wake words, simple initialization, start/stop, callback for detections.
+*/
 
 import 'package:flutter/foundation.dart';
 import 'package:porcupine_flutter/porcupine_manager.dart';
