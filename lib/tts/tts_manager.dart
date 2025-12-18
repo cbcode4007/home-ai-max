@@ -8,6 +8,7 @@
 */
 
 import 'dart:convert';
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:audioplayers/audioplayers.dart';
@@ -21,6 +22,7 @@ typedef TtsError = void Function(String msg);
 class TtsManager {
   final FlutterTts _tts = FlutterTts();
   final AudioPlayer _player = AudioPlayer();
+  Completer<void>? _playbackCompleter;
   final TtsLog? onLog;
   final TtsStart? onStart;
   final TtsComplete? onComplete;
@@ -34,6 +36,10 @@ class TtsManager {
       try {
         onComplete?.call();
       } catch (_) {}
+      try {
+        _playbackCompleter?.complete();
+      } catch (_) {}
+      _playbackCompleter = null;
     });
     _tts.setStartHandler(() {
       onLog?.call('TtsManager: flutter_tts start');
@@ -42,10 +48,18 @@ class TtsManager {
     _tts.setCompletionHandler(() {
       onLog?.call('TtsManager: flutter_tts complete');
       try { onComplete?.call(); } catch (_) {}
+      try {
+        _playbackCompleter?.complete();
+      } catch (_) {}
+      _playbackCompleter = null;
     });
     _tts.setErrorHandler((msg) {
       onLog?.call('TtsManager: flutter_tts error: $msg');
       try { onError?.call(msg); } catch (_) {}
+      try {
+        _playbackCompleter?.completeError(msg);
+      } catch (_) {}
+      _playbackCompleter = null;
     });
   }
 
@@ -53,7 +67,11 @@ class TtsManager {
     try {
       onLog?.call('TtsManager: playing audio bytes (${bytes.length} bytes)');
       onStart?.call();
+      // Create a completer to await actual playback completion (player may
+      // return before audio finishes playing on some platforms)
+      _playbackCompleter = Completer<void>();
       await _player.play(BytesSource(bytes));
+      await _playbackCompleter!.future;
     } catch (e) {
       onLog?.call('TtsManager: audio player error: $e');
       try { onError?.call(e.toString()); } catch (_) {}
@@ -67,7 +85,10 @@ class TtsManager {
       await _tts.setLanguage('en-US');
       await _tts.setPitch(1.0);
       onStart?.call();
+      // As with audio bytes, create a completer and await the TTS completion
+      _playbackCompleter = Completer<void>();
       await _tts.speak(text);
+      await _playbackCompleter!.future;
     } catch (e) {
       onLog?.call('TtsManager: local TTS error: $e');
       try { onError?.call(e.toString()); } catch (_) {}

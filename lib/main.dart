@@ -2,8 +2,8 @@
   © 2025 Colin Bond
   All rights reserved.
 
-  Version:     4.0.7             
-               - explicit copyright notices in all relevant .dart files, picovoice/porcupine API key must be dart defined for security
+  Version:     4.0.8             
+               - 'ongoing conversation' feature where if the user made their last input using speech, the program will listen again
 
   Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
 */
@@ -68,6 +68,8 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   // Variables
+  static const String version = '4.0.8';
+  
   final List<String> _debugLog = [];
   bool _isSpeaking = false;
   LocalServer? _localServer;
@@ -85,11 +87,14 @@ class _MainScreenState extends State<MainScreen> {
   late SttManager _sttManager;
   bool _isListening = false;
   String _lastRecognized = '';
-  bool _autoSentThisSession = false;
+  bool _autoSentThisSession = false;  
   final DeviceUtils deviceUtils = DeviceUtils();
   // 4.0.7, initialize variable for environment key
   String pKey = '';
-
+  // 4.0.8, initialize flag for whether the program last listened to input via orb or wake word
+  bool _lastListened = false;
+  // Tracks whether any speech was detected during the current listening session
+  bool _heardSpeechDuringSession = false;
 
   /* Startup Functions (may run automatically during app startup) */
 
@@ -125,6 +130,8 @@ class _MainScreenState extends State<MainScreen> {
           _controller.selection = TextSelection.fromPosition(
             TextPosition(offset: _controller.text.length),
           );
+          // Mark that we heard audio during this session
+          _heardSpeechDuringSession = true;
         });
     _addDebug('Transcribing (mic button): "$words"');
       },
@@ -137,6 +144,15 @@ class _MainScreenState extends State<MainScreen> {
           _addDebug('Listening stopped (mic button) - status: $status');
           // Update brightness based on orb state
           _updateBrightnessForOrbState();
+          // If the listener stopped due to silence without any captured
+          // speech in this session, clear the ongoing-conversation flag so
+          // we don't treat the next action as a continuation
+          if (!_heardSpeechDuringSession) {
+            setState(() { _lastListened = false; });
+            _addDebug('Listener timed out from silence; clearing _lastListened');
+          }
+          // Reset session-speech marker
+          _heardSpeechDuringSession = false;
           // Auto-send only when speech recognition is truly complete ('done' status)
           // and always in landscape, only when auto-send is enabled in portrait
           final shouldAutoSend = MediaQuery.of(context).orientation == Orientation.landscape ||
@@ -152,6 +168,8 @@ class _MainScreenState extends State<MainScreen> {
       onError: (err) {
         setState(() {
           _isListening = false;
+          // 4.0.8, end ongoing conversation if error occurs during listening
+          _lastListened = false;
         });
         _addDebug('Listening error: $err');
         // Update brightness based on orb state
@@ -361,6 +379,7 @@ class _MainScreenState extends State<MainScreen> {
       await _sttManager.stop();
       setState(() {
         _isListening = false;
+        _lastListened = false;
       });
       _addDebug('Listening stopped');
       if (_hostMode) {
@@ -385,6 +404,8 @@ class _MainScreenState extends State<MainScreen> {
       if (available) {
         setState(() {
           _isListening = true;
+          // 4.0.8, set flag for the last input method being the orb or a call word
+          _lastListened = true;
           _controller.clear();
           _autoSentThisSession = false;
         });
@@ -402,9 +423,12 @@ class _MainScreenState extends State<MainScreen> {
   // POST the contents of text input to specified server endpoint, and try to display as well as read its response
   Future<void> _sendText() async {
     final text = _controller.text.trim();
-    // Abort and go back to listening to porcupine wake word if the text field got through while empty
+    // Abort, end conversation and go back to listening to porcupine wake word if the text field got through while empty
     if (text.isEmpty) {
       if (_hostMode) await porcupineService?.start();
+      setState(() {
+        _lastListened = false;
+      });      
       return;
     }
     setState(() {
@@ -423,6 +447,7 @@ class _MainScreenState extends State<MainScreen> {
       final message = decoded['message'] ?? '';
       if (message != null && (message as String).isNotEmpty) {
         setState(() {
+          _isLoading = false;
           _feedbackMessage = message;
         });
       }
@@ -434,20 +459,34 @@ class _MainScreenState extends State<MainScreen> {
         _addDebug('TTS playback failed: $e');
       }
 
-      if (_hostMode) {
-        // Listen for wake word again instead (don't do anything else until it is ready; 4.0.3)
-        await porcupineService?.start();
-        _addDebug('Porcupine service restarted');
+      // 4.0.8, listen for speech again after sending a spoken input and then
+      // enable porcupine upon timeout if in host mode. Ensure porcupine is
+      // restarted only after the payload response and any playback have fully
+      // completed (TtsManager now awaits actual playback completion).
+      if (_lastListened) {
+        _addDebug('Ongoing conversation: listening again after spoken input');
+        await _toggleListening();
+      } else if (_hostMode) {
+        // Only restart the wake-word listener when we're not continuing an
+        // immediate voice conversation (i.e., when we aren't toggling STT).
+        try {
+          await porcupineService?.start();
+          _addDebug('Porcupine service restarted');
+        } catch (e) {
+          _addDebug('Failed to restart porcupine after response: $e');
+        }
       }
+
     } catch (e) {
       _addDebug('Error sending payload: $e');
       if (!mounted) return;
       setState(() {
         _feedbackMessage = 'Error: ${e.toString()}';
       });
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
+    } 
+    // finally {
+    //   if (mounted) setState(() => _isLoading = false);
+    // }
   }
 
   // Called when Porcupine detects a wake word, toggles listening if not already listening
@@ -649,7 +688,7 @@ class _MainScreenState extends State<MainScreen> {
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Settings (v4.0.7)'),
+        title: const Text('Settings (v$version)'),
         content: Form(
           key: formKey,
           child: Column(
