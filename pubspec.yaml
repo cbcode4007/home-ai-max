@@ -48,6 +48,8 @@ dependencies:
   volume_controller: ^3.4.0
   screen_brightness: ^1.0.1
   flutter_dotenv: ^6.0.0
+  screensaver: ^1.0.4
+  window_size: ^0.1.0
 
 dev_dependencies:
   flutter_test:

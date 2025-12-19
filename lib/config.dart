@@ -16,6 +16,9 @@ class ConfigManager {
   static const String _keyAutoSendSpeech = 'auto_send_speech';
   // 3.5.3
   static const String _keyHostMode = 'host_mode';
+  // 4.0.9 - screensaver timeout in seconds (0 = disabled)
+  static const String _keyScreensaverDelay = 'screensaver_delay_seconds';
+  static const int defaultScreensaverDelaySeconds = 5;
   static const String defaultWebhookUrl = 'http://192.168.123.128:5001/max';
   static const String defaultTtsUrl = 'http://192.168.123.128:5001/tts';
 
@@ -72,5 +75,16 @@ class ConfigManager {
   static Future<void> setHostMode(bool hostMode) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyHostMode, hostMode);
+  }
+
+  /// Screensaver timeout in seconds. 0 disables the screensaver.
+  static Future<int> getScreensaverDelaySeconds() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyScreensaverDelay) ?? defaultScreensaverDelaySeconds;
+  }
+
+  static Future<void> setScreensaverDelaySeconds(int seconds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyScreensaverDelay, seconds);
   }
 }
