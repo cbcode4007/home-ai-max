@@ -2,8 +2,9 @@
   © 2025 Colin Bond
   All rights reserved.
 
-  Version:     4.0.9             
-               - added custom weather screen saver
+  Version:     4.1.0             
+               - addressed a bug where the listener would sometimes immediately stop listening if called again after conversation
+               - more log lines and milliseconds on entries' timestamps
 
   Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
 */
@@ -74,7 +75,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   // Variables
-  static const String version = '4.0.9';
+  static const String version = '4.1.0';
   
   final List<String> _debugLog = [];
   bool _isSpeaking = false;
@@ -105,6 +106,10 @@ class _MainScreenState extends State<MainScreen> {
   bool _lastListened = false;
   // Tracks whether any speech was detected during the current listening session
   bool _heardSpeechDuringSession = false;
+  // 4.1.0
+  // Timestamp when listening last started. Used to ignore spurious immediate
+  // 'notListening'/'done' status events coming right after starting.
+  DateTime? _lastListenStart;
   // 4.0.9, screensaver timer settings (persisted via ConfigManager)
   int _screensaverDelaySeconds = ConfigManager.defaultScreensaverDelaySeconds;
   Timer? _screensaverTimer;
@@ -121,27 +126,44 @@ class _MainScreenState extends State<MainScreen> {
   // Print a debug line to the in-app log, 20 are visible at a time
   void _addDebug(String message) {
     setState(() {
-      _debugLog.add('[${DateTime.now().toIso8601String().substring(11,19)}] $message');
-      if (_debugLog.length > 20) {
-        _debugLog.removeAt(0);
-      }
+      // _debugLog.add('[${DateTime.now().toIso8601String().substring(11,19)}] $message');
+
+      // _debugLog.add(
+      //   '[${DateTime.now().toIso8601String().substring(11, 23)}] $message'
+      // );
+
+      final now = DateTime.now();
+      final timestamp =
+          '${now.hour.toString().padLeft(2, '0')}:'
+          '${now.minute.toString().padLeft(2, '0')}:'
+          '${now.second.toString().padLeft(2, '0')}.'
+          '${now.millisecond.toString().padLeft(3, '0')}';
+
+      _debugLog.add('[$timestamp] $message');
+
+      // if (_debugLog.length > 20) {
+      //   _debugLog.removeAt(0);
+      // }
     });
   }
 
   Future<void> _initializeApp() async {
     // Load config early into a centralized variable used across the app
+    _addDebug("Entering _initConfig");
     await _initConfig();
     // Store the initial device brightness set by the user beforehand to return to later
     // This preserves the user's current brightness setting without changing it
     if (!_isDesktop) {
+      _addDebug("Entering getBrightness");
       _userBrightness = await deviceUtils.getBrightness();
-      _addDebug('Preserved user brightness: $_userBrightness');
+      // _addDebug('Preserved user brightness: $_userBrightness');
     } else {
-      _addDebug('Desktop build detected — skipping brightness preservation');
+      // _addDebug('Desktop build detected, skipping brightness preservation');
     }
     // Create STT manager and wire callbacks into the UI/state
     _sttManager = SttManager(
       onResult: (words) {
+        _addDebug("Entering _initializeApp onResult callback");
         setState(() {
           _lastRecognized = words;
           _controller.text = _lastRecognized;
@@ -151,23 +173,39 @@ class _MainScreenState extends State<MainScreen> {
           // Mark that we heard audio during this session
           _heardSpeechDuringSession = true;
         });
-    _addDebug('Transcribing (mic button): "$words"');
+        _addDebug('Transcribing (mic button): "$words"');
       },
       // Callback for when a status is returned
       onStatus: (status) {
+        // 4.1.0
+        // Ignore very quick stop statuses that occur immediately after
+        // starting listening, some platforms emit a transient 'notListening'
+        // or 'done' right away when no audio is present, so if the status
+        // arrives within a short grace period after requested start,
+        // ignore it
+        if ((status == 'done' || status == 'notListening') &&
+            _lastListenStart != null &&
+            DateTime.now().difference(_lastListenStart!) < const Duration(milliseconds: 400)) {
+          _addDebug('Ignoring quick STT status "$status" (${DateTime.now().difference(_lastListenStart!).inMilliseconds}ms since start)');
+          return;
+        }
+
         if (status == 'done' || status == 'notListening') {
+          // Clear the last-start marker now that we've seen a terminal status
+          _lastListenStart = null;
           setState(() {
             _isListening = false;
           });
           _addDebug('Listening stopped (mic button) - status: $status');
           // Update brightness based on orb state
+          _addDebug("Entering _updateBrightnessForOrbState");
           _updateBrightnessForOrbState();
           // If the listener stopped due to silence without any captured
           // speech in this session, clear the ongoing-conversation flag so
           // we don't treat the next action as a continuation
           if (!_heardSpeechDuringSession) {
             setState(() { _lastListened = false; });
-            _addDebug('Listener timed out from silence; clearing _lastListened');
+            _addDebug('Listener timed out from silence, clearing _lastListened');
           }
           // Reset session-speech marker
           _heardSpeechDuringSession = false;
@@ -177,7 +215,7 @@ class _MainScreenState extends State<MainScreen> {
                                (_autoSendSpeech && _controller.text.trim().isNotEmpty);
           if (status == 'done' && shouldAutoSend && !_autoSentThisSession) {
             _autoSentThisSession = true;
-            _addDebug('Auto-sending speech: "${_controller.text.trim()}"');
+            _addDebug('Auto-sending: "${_controller.text.trim()}"');
             _sendText();
           }
         }
@@ -191,6 +229,7 @@ class _MainScreenState extends State<MainScreen> {
         });
         _addDebug('Listening error: $err');
         // Update brightness based on orb state
+        _addDebug("Entering _updateBrightnessForOrbState");
         _updateBrightnessForOrbState();
         // Listen to wake word again (don't do anything else until it is ready; 4.0.3)
         if (_hostMode) {          
@@ -206,22 +245,26 @@ class _MainScreenState extends State<MainScreen> {
       onStart: () {
         setState(() => _isSpeaking = true);
         _addDebug('TTS: start handler');
+        _addDebug("Entering _updateBrightnessForOrbState");
         _updateBrightnessForOrbState();
       },
       onComplete: () {
         setState(() => _isSpeaking = false);
         _addDebug('TTS: complete handler');
+        _addDebug("Entering _updateBrightnessForOrbState");
         _updateBrightnessForOrbState();
       },
       onError: (msg) {
         setState(() => _isSpeaking = false);
         _addDebug('TTS: error handler: $msg');
+        _addDebug("Entering _updateBrightnessForOrbState");
         _updateBrightnessForOrbState();
       },
     );
     _ttsManager.init();
     // 4.0.4, turned repeated starting Flask server and initializing Porcupine into a separate method
     if (_hostMode) {
+      _addDebug("Entering _startHostServices");
       await _startHostServices();
     }    
 
@@ -360,13 +403,13 @@ class _MainScreenState extends State<MainScreen> {
   }
 
   Future<String> _loadKey() async {
-  // 4.0.7, load API key from environment variable passed at compile time
-  const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
-  if (apiKey.isEmpty) {
-    throw Exception('Missing API_KEY. Add it via --dart-define=API_KEY=... or provide a server-side proxy.');
+    // 4.0.7, load API key from environment variable passed at compile time
+    const apiKey = String.fromEnvironment('API_KEY', defaultValue: '');
+    if (apiKey.isEmpty) {
+      throw Exception('Missing API_KEY. Add it via --dart-define=API_KEY=... or provide a server-side proxy.');
+    }
+    return apiKey;
   }
-  return apiKey;
-}
 
   /* Input Functions (run after a user interaction with the interface) */
 
@@ -467,33 +510,37 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _toggleListening() async {
     // When STT listening
     if (_isListening) {
-      _addDebug('Stopping listening');
+      _addDebug('Already listening, toggling listening off');
       await _sttManager.stop();
       setState(() {
         _isListening = false;
         _lastListened = false;
-      });
+      });      
       _addDebug('Listening stopped');
+      _addDebug("Conversation ended");
       if (_hostMode) {
         // Listen for wake word again instead (don't do anything else until it is ready; 4.0.3)
         await porcupineService?.start();
         _addDebug('Porcupine service restarted');
       }      
       // Update brightness based on orb state
+      _addDebug("Entering _updateBrightnessForOrbState");
       _updateBrightnessForOrbState();
       
     // When STT not listening and needs to initialize
     } else {
-      _addDebug('Initializing listening');
+      _addDebug('Not already listening, toggling listening on');
       if (_hostMode) {
         // Free up microphone from porcupine service (don't do anything else until this is done; 4.0.3)
         await porcupineService?.stop();
         _addDebug('Porcupine service stopped for transcription');
       }
+      _addDebug("Entering STT manager initializer");
       bool available = await _sttManager.initialize();
 
       // When STT not listening and already initialized
       if (available) {
+        _addDebug("STT available, starting listening");
         setState(() {
           _isListening = true;
           // 4.0.8, set flag for the last input method being the orb or a call word
@@ -504,8 +551,15 @@ class _MainScreenState extends State<MainScreen> {
         _addDebug('Listening started (mic button)');
         // Update brightness based on orb state
         _updateBrightnessForOrbState();
+        // 4.1.0
         // Produces onResult and onStatus events (handled by STT manager callbacks)
+        // Record the start time and request listening, this helps ignore
+        // any immediate 'notListening' status some platforms emit right
+        // after starting when no audio is present
+        _lastListenStart = DateTime.now();
+
         await _sttManager.startListening(localeId: 'en_US');
+        _addDebug('STT manager startListening returned true');
       } else {
         _addDebug('Speech recognizer not available (mic button)');
       }
@@ -516,6 +570,7 @@ class _MainScreenState extends State<MainScreen> {
   Future<void> _sendText() async {
     final text = _controller.text.trim();
     // Abort, end conversation and go back to listening to porcupine wake word if the text field got through while empty
+    _addDebug("Text is empty, returning");
     if (text.isEmpty) {
       if (_hostMode) await porcupineService?.start();
       setState(() {
@@ -594,22 +649,25 @@ class _MainScreenState extends State<MainScreen> {
 
   // Helper method to update brightness based on orb state (only if host mode is enabled)
   Future<void> _updateBrightnessForOrbState() async {
-    if (!_hostMode) return;
+    if (!_hostMode) {
+      _addDebug("Not host mode, returning");
+      return;
+    }
 
     // Skip brightness changes on desktop builds — not all platforms support
     // programmatic brightness control and it isn't useful when testing on desktop.
     if (_isDesktop) {
-      _addDebug('Desktop build detected — skipping brightness adjustments');
+      // _addDebug('Desktop build detected — skipping brightness adjustments');
       return;
     }
 
     final isOrbActive = _isListening || _isSpeaking;
     if (isOrbActive) {
       await deviceUtils.setBrightness(1.0);
-      _addDebug('Brightness set to max (orb active)');
+      // _addDebug('Brightness set to max (orb active)');
     } else {
       await deviceUtils.setBrightness(_userBrightness);
-      _addDebug('Brightness reset to user setting (orb inactive)');
+      // _addDebug('Brightness reset to user setting (orb inactive)');
     }
   }
 
