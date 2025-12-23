@@ -4,6 +4,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'dart:math' show pow;
 import 'package:window_size/window_size.dart';
 
 void main() {
@@ -32,7 +33,6 @@ class WeatherApp extends StatelessWidget {
           primary: Colors.deepPurpleAccent,
           secondary: Colors.blueAccent,
         ),
-        scaffoldBackgroundColor: const Color(0xFF181A20),
       ),
       home: const IgnorePointer(
         child: WeatherScreen(),
@@ -55,6 +55,8 @@ class _WeatherScreenState extends State<WeatherScreen>
 
   Timer? _refreshTimer;
   bool _fetching = false;
+
+  String fetchError = "";
 
   @override
   void initState() {
@@ -101,9 +103,12 @@ class _WeatherScreenState extends State<WeatherScreen>
           // print('Weather fetch successful');
         }                
       }
-    } catch (_) {
+    } catch (e) {
       // intentionally silent for screensaver use
-      // print('Weather fetch error');      
+      // print('Weather fetch error');
+      if (mounted) {
+        setState(() => fetchError = e.toString());
+      }      
     } finally {
       _fetching = false;
       if (mounted) {
@@ -156,6 +161,46 @@ class _WeatherScreenState extends State<WeatherScreen>
         .join(' ');
   }
 
+  Color colorScaffoldBackground() {
+    final sunrise = data?['riseSet']['sunrise']['en'];
+    final Color dayColor = const Color.fromARGB(255, 17, 124, 167);
+    final sunset = data?['riseSet']['sunset']['en'];
+    final Color nightColor = const Color(0xFF181A20);
+    if (sunrise != null && sunset != null) {
+      if (DateTime.now().isAfter(DateTime.parse(sunrise)) &&
+          DateTime.now().isBefore(DateTime.parse(sunset))) {
+        return dayColor;
+      } else {
+        // return dayColor;
+        return nightColor;
+      }
+    }
+    return dayColor;
+  }
+
+  String getLocalDateString(apiDate) {
+    final utcDate = DateTime.parse(apiDate);
+    final localDate = utcDate.toLocal();
+    final strDate =
+    '${localDate.year.toString().padLeft(4, '0')}-'
+    '${localDate.month.toString().padLeft(2, '0')}-'
+    '${localDate.day.toString().padLeft(2, '0')} '
+    '${localDate.hour.toString().padLeft(2, '0')}:'
+    '${localDate.minute.toString().padLeft(2, '0')}:'
+    '${localDate.second.toString().padLeft(2, '0')}';
+    return strDate;
+  }
+
+  num getWindchill(num temp, num windspeed) {
+    if (temp < 10 && windspeed >= 5) {
+      final powTerm = pow(windspeed.toDouble(), 0.16);
+      final windchill = 13.12 + 0.6215 * temp - 11.37 * powTerm + 0.3965 * temp * powTerm;
+      return windchill;
+    } else {
+      return temp;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (loading && data == null) {
@@ -165,108 +210,171 @@ class _WeatherScreenState extends State<WeatherScreen>
     }
 
     if (data == null) {
-      return const Scaffold(
-        body: Center(child: Text('Weather unavailable')),
+      return Scaffold(
+        body: Center(child: Text('Weather unavailable: $fetchError')),
       );
     }
 
     final cur = data!['currentConditions'];
     final curTemp = cur['temperature']['value']['en'];
+    // final curFeel = cur['windChill']['value']['en'];
+    final windSpeed = cur['wind']['speed']['value']['en'];
     final curCond = cur['condition']['en'];
-    final curIconField = cur['iconCode'];
+    final curIconField = cur['iconCode'];    
 
     final forecasts =
-        (data!['forecastGroup']['forecasts'] as List).take(4).toList();
+            (data!['forecastGroup']['forecasts'] as List).take(4).toList();
+    final lastUpdated = data!['lastUpdated'];
+
+    final lastUpdatedStr = getLocalDateString(lastUpdated);
+    final curFeel = getWindchill(curTemp, windSpeed);
 
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // CURRENT
-            Expanded(
-              flex: 2,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text(
-                    'Current',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      backgroundColor: colorScaffoldBackground(),
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // CURRENT
+                Expanded(
+                  flex: 2,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Text(
+                        'Current',
+                        style:
+                            TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 16),
+                      weatherIcon(curIconField, size: 80),
+                      const SizedBox(height: 12),
+                      Text(
+                        '$curTemp°C',
+                        style: const TextStyle(
+                            fontSize: 40, fontWeight: FontWeight.bold),
+                      ),
+                      if (curFeel != curTemp)
+                        Text(
+                          "Feels like ${curFeel.toStringAsFixed(1)}°C",
+                          textAlign: TextAlign.center,
+                        ),
+                      const SizedBox(height: 8),
+                      Text(curCond, textAlign: TextAlign.center),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  weatherIcon(curIconField, size: 80),
-                  const SizedBox(height: 12),
-                  Text(
-                    '$curTemp°C',
-                    style: const TextStyle(
-                        fontSize: 40, fontWeight: FontWeight.bold),
+                ),
+
+                // FORECASTS
+                for (final f in forecasts)
+                  Expanded(
+                    child: Builder(
+                      builder: (_) {
+                        final name =
+                            (f['period']?['textForecastName']?['en'] ?? '')
+                                .toLowerCase();
+                        final temps =
+                            f['temperatures']?['temperature'] as List?;
+                        String temp = '—';
+
+                        if (temps != null && temps.isNotEmpty) {
+                          final prefersLow = name.contains('night') ||
+                              name.contains('overnight') ||
+                              name.contains('evening');
+
+                          Map? picked;
+                          try {
+                            picked = temps.firstWhere((t) =>
+                                t['class']?['en'] ==
+                                (prefersLow ? 'low' : 'high'));
+                          } catch (_) {}
+
+                          picked ??= temps.first;
+                          temp =
+                              picked?['value']?['en']?.toString() ?? '—';
+                        }
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            const SizedBox(height: 52),
+
+                            // PERIOD NAME (fixed height)
+                            SizedBox(
+                              height: 52,
+                              child: Text(
+                                titleCase(f['period']['textForecastName']['en']),
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+
+                            // ICON (fixed height)
+                            SizedBox(
+                              height: 44,
+                              child: Center(
+                                child: weatherIcon(
+                                  f['abbreviatedForecast']['icon'],
+                                  size: 40,
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            // TEMPERATURE (fixed height)
+                            SizedBox(
+                              height: 28,
+                              child: Text(
+                                '$temp°C',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            // SUMMARY (fixed height prevents shifting)
+                            SizedBox(
+                              height: 48,
+                              child: Text(
+                                f['abbreviatedForecast']['textSummary']['en'],
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontSize: 12),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(curCond, textAlign: TextAlign.center),
-                ],
+              ],
+            ),
+          ),
+
+          // UPDATED TIMESTAMP (top-right overlay)
+          Positioned(
+            top: 12,
+            right: 16,
+            child: Text(
+              'Updated: $lastUpdatedStr',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withOpacity(0.7),
               ),
             ),
-
-            // FORECASTS
-            for (final f in forecasts)
-              Expanded(
-                child: Builder(
-                  builder: (_) {
-                    final name =
-                        (f['period']?['textForecastName']?['en'] ?? '')
-                            .toLowerCase();
-                    final temps =
-                        f['temperatures']?['temperature'] as List?;
-                    String temp = '—';
-
-                    if (temps != null && temps.isNotEmpty) {
-                      final prefersLow = name.contains('night') ||
-                          name.contains('overnight') ||
-                          name.contains('evening');
-
-                      Map? picked;
-                      try {
-                        picked = temps.firstWhere((t) =>
-                            t['class']?['en'] ==
-                            (prefersLow ? 'low' : 'high'));
-                      } catch (_) {}
-
-                      picked ??= temps.first;
-                      temp = picked?['value']?['en']?.toString() ?? '—';
-                    }
-
-                    return Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          titleCase(
-                              f['period']['textForecastName']['en']),
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                              fontSize: 14, fontWeight: FontWeight.bold),
-                        ),
-                        const SizedBox(height: 12),
-                        weatherIcon(f['abbreviatedForecast']['icon'], size: 40),
-                        const SizedBox(height: 6),
-                        Text(
-                          '$temp°C',
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 6),
-                        Text(
-                          f['abbreviatedForecast']['textSummary']['en'],
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

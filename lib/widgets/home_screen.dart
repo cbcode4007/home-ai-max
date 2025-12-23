@@ -2,9 +2,8 @@
   © 2025 Colin Bond
   All rights reserved.
 
-  Version:     4.1.0             
-               - addressed a bug where the listener would sometimes immediately stop listening if called again after conversation
-               - more log lines and milliseconds on entries' timestamps
+  Version:     4.1.1             
+               - weather screen 'feels like' value, last updated timestamp, dynamic time of day background, layout adjustment, erroring               
 
   Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
 */
@@ -75,7 +74,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   // Variables
-  static const String version = '4.1.0';
+  static const String version = '4.1.1';
   
   final List<String> _debugLog = [];
   bool _isSpeaking = false;
@@ -211,7 +210,7 @@ class _MainScreenState extends State<MainScreen> {
           _heardSpeechDuringSession = false;
           // Auto-send only when speech recognition is truly complete ('done' status)
           // and always in landscape, only when auto-send is enabled in portrait
-          final shouldAutoSend = MediaQuery.of(context).orientation == Orientation.landscape ||
+          final shouldAutoSend = MediaQuery.of(context).orientation == Orientation.landscape && _controller.text.trim().isNotEmpty ||
                                (_autoSendSpeech && _controller.text.trim().isNotEmpty);
           if (status == 'done' && shouldAutoSend && !_autoSentThisSession) {
             _autoSentThisSession = true;
@@ -569,9 +568,9 @@ class _MainScreenState extends State<MainScreen> {
   // POST the contents of text input to specified server endpoint, and try to display as well as read its response
   Future<void> _sendText() async {
     final text = _controller.text.trim();
-    // Abort, end conversation and go back to listening to porcupine wake word if the text field got through while empty
-    _addDebug("Text is empty, returning");
+    // Abort, end conversation and go back to listening to porcupine wake word if the text field got through while empty    
     if (text.isEmpty) {
+      _addDebug("Text is empty, returning");
       if (_hostMode) await porcupineService?.start();
       setState(() {
         _lastListened = false;
