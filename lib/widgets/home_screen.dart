@@ -1,13 +1,3 @@
-/*
-  © 2025 Colin Bond
-  All rights reserved.
-
-  Version:     4.1.1             
-               - weather screen 'feels like' value, last updated timestamp, dynamic time of day background, layout adjustment, erroring               
-
-  Description: Main file that assembles, and controls the logic of the Home AI Max Flutter app.
-*/
-
 // Basic UI package
 import 'dart:async';
 import 'dart:io' show Platform;
@@ -74,7 +64,7 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   // Variables
-  static const String version = '4.1.1';
+  static const String version = '4.1.3';
   
   final List<String> _debugLog = [];
   bool _isSpeaking = false;
@@ -156,8 +146,6 @@ class _MainScreenState extends State<MainScreen> {
       _addDebug("Entering getBrightness");
       _userBrightness = await deviceUtils.getBrightness();
       // _addDebug('Preserved user brightness: $_userBrightness');
-    } else {
-      // _addDebug('Desktop build detected, skipping brightness preservation');
     }
     // Create STT manager and wire callbacks into the UI/state
     _sttManager = SttManager(
@@ -288,7 +276,10 @@ class _MainScreenState extends State<MainScreen> {
         _hostMode = hostMode;
       });
       // Load persisted screensaver delay (0 disables it)
-      final screensaverDelay = await ConfigManager.getScreensaverDelaySeconds();
+      int screensaverDelay = await ConfigManager.getScreensaverDelaySeconds();
+      if (_isDesktop) {
+        screensaverDelay = 5;
+      }
       setState(() {
         _screensaverDelaySeconds = screensaverDelay;
       });
@@ -880,30 +871,6 @@ class _MainScreenState extends State<MainScreen> {
                 },
               ),
               const SizedBox(height: 20),
-              StatefulBuilder(
-                builder: (context, setState) => SwitchListTile(
-                  title: const Text('Show Debug Log'),
-                  value: debugVisible,
-                  onChanged: (value) {
-                    setState(() {
-                      debugVisible = value;
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(height: 6),
-              StatefulBuilder(
-                builder: (context, setState) => SwitchListTile(
-                  title: const Text('Auto-Send Speech'),
-                  value: autoSend,
-                  onChanged: (value) {
-                    setState(() {
-                      autoSend = value;
-                    });
-                  },
-                ),
-              ),
-              const SizedBox(height: 6),
               // Screensaver timeout input
               TextFormField(
                 controller: screensaverCtrl,
@@ -918,6 +885,31 @@ class _MainScreenState extends State<MainScreen> {
                   return null;
                 },
               ),
+              const SizedBox(height: 16),
+              StatefulBuilder(
+                builder: (context, setState) => SwitchListTile(
+                  title: const Text('Show Debug Log'),
+                  value: debugVisible,
+                  onChanged: (value) {
+                    setState(() {
+                      debugVisible = value;
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(height: 4),
+              StatefulBuilder(
+                builder: (context, setState) => SwitchListTile(
+                  title: const Text('Auto-Send Speech'),
+                  value: autoSend,
+                  onChanged: (value) {
+                    setState(() {
+                      autoSend = value;
+                    });
+                  },
+                ),
+              ),
+              const SizedBox(height: 4),             
               StatefulBuilder(
                 builder: (context, setState) => SwitchListTile(
                   title: const Text('Host Mode'),

@@ -65,7 +65,7 @@ class _WeatherScreenState extends State<WeatherScreen>
 
     fetchWeather();
     _refreshTimer =
-        Timer.periodic(const Duration(minutes: 1), (_) => fetchWeather());
+        Timer.periodic(const Duration(minutes: 5), (_) => fetchWeather());
   }
 
   @override
@@ -90,7 +90,8 @@ class _WeatherScreenState extends State<WeatherScreen>
     try {
       final resp = await http
           .get(Uri.parse(
-            'https://api.weather.gc.ca/collections/citypageweather-realtime/items/on-117?f=json',
+            // 'https://api.weather.gc.ca/collections/citypageweather-realtime/items/on-117?f=json',
+            'http://192.168.123.128:5001/envcanada_api',
           ))
           .timeout(const Duration(seconds: 10));
 
@@ -117,13 +118,13 @@ class _WeatherScreenState extends State<WeatherScreen>
     }
   }
 
-  IconData getIcon(int code) {
-    if (code <= 9) return Icons.wb_sunny;
-    if (code <= 18) return Icons.cloud;
-    if (code <= 29) return Icons.grain;
-    if (code <= 39) return Icons.ac_unit;
-    return Icons.help;
-  }
+  // IconData getIcon(int code) {
+  //   if (code <= 9) return Icons.wb_sunny;
+  //   if (code <= 18) return Icons.cloud;
+  //   if (code <= 29) return Icons.grain;
+  //   if (code <= 39) return Icons.ac_unit;
+  //   return Icons.help;
+  // }
 
   Widget weatherIcon(dynamic iconField, {double size = 50}) {
     if (iconField == null) return Icon(Icons.help, size: size);
@@ -134,14 +135,15 @@ class _WeatherScreenState extends State<WeatherScreen>
       url = iconField;
     } else if (iconField is Map) {
       if (iconField['url'] is String) url = iconField['url'];
-      if (url == null && iconField['value'] is num) {
-        return Icon(getIcon(iconField['value']), size: size);
-      }
-    } else if (iconField is num) {
-      return Icon(getIcon(iconField.toInt()), size: size);
+      // if (url == null && iconField['value'] is num) {
+      //   return Icon(getIcon(iconField['value']), size: size);
+      // }
+    // } else if (iconField is num) {
+    //   return Icon(getIcon(iconField.toInt()), size: size);
     }
 
     if (url != null && url.startsWith('http')) {
+
       return Image.network(
         url,
         width: size,
@@ -220,14 +222,26 @@ class _WeatherScreenState extends State<WeatherScreen>
     // final curFeel = cur['windChill']['value']['en'];
     final windSpeed = cur['wind']['speed']['value']['en'];
     final curCond = cur['condition']['en'];
-    final curIconField = cur['iconCode'];    
+    // final curIconField = cur['iconCode'];
+
+    final curIconOriginal = cur['iconCode']['url'];
+    String curIconOriginalString = curIconOriginal.toString();
+    dynamic curIconField = curIconOriginalString.replaceAll('https://weather.gc.ca/weathericons', 'http://192.168.123.128:5001/envcanada');    
 
     final forecasts =
             (data!['forecastGroup']['forecasts'] as List).take(4).toList();
     final lastUpdated = data!['lastUpdated'];
 
     final lastUpdatedStr = getLocalDateString(lastUpdated);
-    final curFeel = getWindchill(curTemp, windSpeed);
+
+    // Wind Speed handling (sometimes values like "calm" will appear instead of a wind speed number)
+    // Get string from json and see whether or not it can be parsed to int
+    final windSpeedString = windSpeed.toString();
+    // Default to 0 if parsing fails
+    int? windSpeedNum = int.tryParse(windSpeedString);
+    windSpeedNum ??= 0;
+
+    final curFeel = getWindchill(curTemp, windSpeedNum);
 
     return Scaffold(
       backgroundColor: colorScaffoldBackground(),
@@ -255,7 +269,7 @@ class _WeatherScreenState extends State<WeatherScreen>
                       Text(
                         '$curTemp°C',
                         style: const TextStyle(
-                            fontSize: 40, fontWeight: FontWeight.bold),
+                            fontSize: 50, fontWeight: FontWeight.bold),
                       ),
                       if (curFeel != curTemp)
                         Text(
@@ -300,7 +314,7 @@ class _WeatherScreenState extends State<WeatherScreen>
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.center,
                           children: [
-                            const SizedBox(height: 52),
+                            const SizedBox(height: 60),
 
                             // PERIOD NAME (fixed height)
                             SizedBox(
@@ -330,17 +344,18 @@ class _WeatherScreenState extends State<WeatherScreen>
 
                             // TEMPERATURE (fixed height)
                             SizedBox(
-                              height: 28,
+                              // height: 28,
+                              height: 44,
                               child: Text(
                                 '$temp°C',
                                 style: const TextStyle(
-                                  fontSize: 18,
+                                  fontSize: 25,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
                             ),
 
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 10),
 
                             // SUMMARY (fixed height prevents shifting)
                             SizedBox(

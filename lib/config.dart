@@ -18,7 +18,7 @@ class ConfigManager {
   static const String _keyHostMode = 'host_mode';
   // 4.0.9 - screensaver timeout in seconds (0 = disabled)
   static const String _keyScreensaverDelay = 'screensaver_delay_seconds';
-  static const int defaultScreensaverDelaySeconds = 5;
+  static const int defaultScreensaverDelaySeconds = 60;
   static const String defaultWebhookUrl = 'http://192.168.123.128:5001/max';
   static const String defaultTtsUrl = 'http://192.168.123.128:5001/tts';
 
